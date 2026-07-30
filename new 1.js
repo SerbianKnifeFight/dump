@@ -4,30 +4,32 @@ var comp = app.project.activeItem;
 
 if (!(comp instanceof CompItem)) {
     alert("Open your composition first.");
-    app.endUndoGroup();
     throw new Error("No composition selected.");
 }
+
+var layerName = "pyanoo.mp4";
 
 // ─────────────────────────────────────────────
 // SETTINGS
 // ─────────────────────────────────────────────
 
-var layerName = "pyanoo.mp4";
-
-var bpm = parseFloat(
-    prompt("BPM:", "120")
-);
+var bpm = parseFloat(prompt("BPM:", "120"));
 
 if (isNaN(bpm) || bpm <= 0) {
     alert("Invalid BPM.");
-    app.endUndoGroup();
     throw new Error("Invalid BPM.");
 }
 
 var beatLength = 60 / bpm;
 
+// Percentage of each beat used for movement.
+// 0.20 = movement lasts 20% of the beat.
+var movePercent = 0.20;
+
+var moveLength = beatLength * movePercent;
+
 // ─────────────────────────────────────────────
-// FIND THE THREE VIDEOS
+// FIND THE 3 VIDEOS
 // ─────────────────────────────────────────────
 
 var vids = [];
@@ -46,14 +48,11 @@ if (vids.length != 3) {
         layerName +
         "\n\nFound: " + vids.length
     );
-
-    app.endUndoGroup();
-    throw new Error("Wrong number of video layers.");
+    throw new Error("Wrong number of layers.");
 }
 
 // ─────────────────────────────────────────────
-// SAVE THEIR CURRENT POSITIONS
-// These become our carousel slots.
+// CURRENT POSITIONS = CAROUSEL SLOTS
 // ─────────────────────────────────────────────
 
 var slots = [
@@ -62,10 +61,7 @@ var slots = [
     vids[2].position.value
 ];
 
-// ─────────────────────────────────────────────
-// REMOVE EXISTING POSITION KEYFRAMES
-// ─────────────────────────────────────────────
-
+// Remove existing position keyframes
 for (var i = 0; i < 3; i++) {
 
     var pos = vids[i].position;
@@ -73,36 +69,28 @@ for (var i = 0; i < 3; i++) {
     while (pos.numKeys > 0) {
         pos.removeKey(1);
     }
-}
 
-// ─────────────────────────────────────────────
-// CURRENT SLOT ASSIGNMENTS
-//
-// Video 0 starts in slot 0
-// Video 1 starts in slot 1
-// Video 2 starts in slot 2
-// ─────────────────────────────────────────────
-
-var state = [0, 1, 2];
-
-// Put the videos in their original positions
-for (var i = 0; i < 3; i++) {
-    vids[i].position.setValueAtTime(
+    pos.setValueAtTime(
         comp.displayStartTime,
-        slots[state[i]]
+        slots[i]
     );
 }
 
 // ─────────────────────────────────────────────
-// MAKE BEAT KEYFRAMES
+// INITIAL SLOT ASSIGNMENTS
 // ─────────────────────────────────────────────
+
+var state = [0, 1, 2];
 
 var t = comp.displayStartTime + beatLength;
 
+// ─────────────────────────────────────────────
+// BEAT LOOP
+// ─────────────────────────────────────────────
+
 while (t < comp.duration) {
 
-    // Rotate the carousel:
-    //
+    // Rotate:
     // 0 → 1
     // 1 → 2
     // 2 → 0
@@ -113,22 +101,39 @@ while (t < comp.duration) {
         state[1]
     ];
 
+    var startTime = t;
+    var endTime = t + moveLength;
+
     for (var i = 0; i < 3; i++) {
 
         var pos = vids[i].position;
 
-        pos.setValueAtTime(
-            t,
-            slots[state[i]]
-        );
+        // Current position at the beat
+        var from = pos.valueAtTime(startTime - 0.001);
 
-        // Make the transition instantaneous
-        var key = pos.nearestKeyIndex(t);
+        // New carousel slot
+        var to = slots[state[i]];
+
+        // Start
+        pos.setValueAtTime(startTime, from);
+
+        // End
+        pos.setValueAtTime(endTime, to);
+
+        // Smooth movement
+        var k1 = pos.nearestKeyIndex(startTime);
+        var k2 = pos.nearestKeyIndex(endTime);
 
         pos.setInterpolationTypeAtKey(
-            key,
-            KeyframeInterpolationType.HOLD,
-            KeyframeInterpolationType.HOLD
+            k1,
+            KeyframeInterpolationType.BEZIER,
+            KeyframeInterpolationType.BEZIER
+        );
+
+        pos.setInterpolationTypeAtKey(
+            k2,
+            KeyframeInterpolationType.BEZIER,
+            KeyframeInterpolationType.BEZIER
         );
     }
 
@@ -140,5 +145,6 @@ app.endUndoGroup();
 alert(
     "Pyanoo carousel created!\n\n" +
     "BPM: " + bpm +
-    "\nBeat: " + beatLength.toFixed(3) + " seconds"
+    "\nMovement: " + Math.round(movePercent * 100) +
+    "% of each beat"
 );
