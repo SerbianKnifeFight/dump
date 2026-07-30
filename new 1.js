@@ -1,143 +1,101 @@
 app.beginUndoGroup("Beat Carousel");
 
 var comp = app.project.activeItem;
-
 if (!(comp instanceof CompItem)) {
-    alert("Open your composition first.");
-    throw new Error("No composition selected.");
+    alert("Open a composition first.");
+    throw new Error();
 }
 
-var layerName = "pyanoo.mp4";
+var layerName = prompt("Name of the 3 video layers:", "video");
+var audio = comp.layer("Audio Amplitude");
 
-// ─────────────────────────────────────────────
-// SETTINGS
-// ─────────────────────────────────────────────
-
-var bpm = parseFloat(prompt("BPM:", "120"));
-
-if (isNaN(bpm) || bpm <= 0) {
-    alert("Invalid BPM.");
-    throw new Error("Invalid BPM.");
+if (!audio) {
+    alert("No 'Audio Amplitude' layer found.\nRun Convert Audio to Keyframes first.");
+    throw new Error();
 }
 
-var beatLength = 60 / bpm;
-
-// How much of each beat is spent moving
-var movePercent = 0.20;
-var moveLength = beatLength * movePercent;
-
-// ─────────────────────────────────────────────
-// FIND THE 3 VIDEOS
-// ─────────────────────────────────────────────
-
+// Find the 3 matching layers
 var vids = [];
-
 for (var i = 1; i <= comp.numLayers; i++) {
-    if (comp.layer(i).name == layerName) {
-        vids.push(comp.layer(i));
-    }
+    var l = comp.layer(i);
+    if (l.name == layerName && vids.length < 3)
+        vids.push(l);
 }
 
 if (vids.length != 3) {
-    alert(
-        "Expected exactly 3 layers named:\n\n" +
-        layerName +
-        "\n\nFound: " + vids.length
-    );
-    throw new Error("Wrong number of layers.");
+    alert("Couldn't find exactly 3 layers named '" + layerName + "'.");
+    throw new Error();
 }
 
-// ─────────────────────────────────────────────
-// THEIR CURRENT POSITIONS ARE THE 3 SLOTS
-// ─────────────────────────────────────────────
-
+// Their current positions become the 3 carousel slots
 var slots = [
     vids[0].position.value,
     vids[1].position.value,
     vids[2].position.value
 ];
 
-// Remove existing position animation
-for (var i = 0; i < 3; i++) {
-    var pos = vids[i].position;
+// Audio amplitude
+var amp = audio.effect("Both Channels")("Slider");
 
-    while (pos.numKeys > 0) {
-        pos.removeKey(1);
+var threshold = 35; // Increase/decrease for sensitivity
+var minBeatGap = 0.20; // seconds between beats
+
+// Find amplitude peaks
+var beats = [];
+var lastBeat = -999;
+
+for (var k = 2; k < amp.numKeys; k++) {
+    var prev = amp.keyValue(k - 1);
+    var cur  = amp.keyValue(k);
+    var next = amp.keyValue(k + 1);
+
+    if (cur > threshold && cur >= prev && cur >= next) {
+        var t = amp.keyTime(k);
+
+        if (t - lastBeat >= minBeatGap) {
+            beats.push(t);
+            lastBeat = t;
+        }
     }
-
-    pos.setValueAtTime(
-        comp.displayStartTime,
-        slots[i]
-    );
 }
 
-// Current slot of each video
+// Clear existing position animation
+for (var v = 0; v < 3; v++) {
+    var pos = vids[v].position;
+    while (pos.numKeys > 0)
+        pos.removeKey(1);
+}
+
+// Initial positions
 var state = [0, 1, 2];
 
-var t = comp.displayStartTime + beatLength;
+for (var v = 0; v < 3; v++)
+    vids[v].position.setValueAtTime(0, slots[state[v]]);
 
-// ─────────────────────────────────────────────
-// CREATE BEAT MOVEMENT
-// ─────────────────────────────────────────────
+// Rotate positions on every beat
+for (var b = 0; b < beats.length; b++) {
 
-while (t < comp.duration) {
-
-    // Rotate:
-    // A → B
-    // B → C
-    // C → A
-
-    var oldState = [
-        state[0],
-        state[1],
-        state[2]
-    ];
-
+    // 0 -> 1 -> 2 -> 0
     state = [
-        oldState[2],
-        oldState[0],
-        oldState[1]
+        state[2],
+        state[0],
+        state[1]
     ];
 
-    for (var i = 0; i < 3; i++) {
+    for (var v = 0; v < 3; v++) {
+        var p = vids[v].position;
+        var key = p.addKey(beats[b]);
+        p.setValueAtKey(key, slots[state[v]]);
 
-        var pos = vids[i].position;
-
-        var from = slots[oldState[i]];
-        var to   = slots[state[i]];
-
-        // Start of movement
-        pos.setValueAtTime(t, from);
-
-        // End of movement
-        pos.setValueAtTime(t + moveLength, to);
-
-        // Smooth the movement
-        var startKey = pos.nearestKeyIndex(t);
-        var endKey = pos.nearestKeyIndex(t + moveLength);
-
-        pos.setInterpolationTypeAtKey(
-            startKey,
-            KeyframeInterpolationType.BEZIER,
-            KeyframeInterpolationType.BEZIER
-        );
-
-        pos.setInterpolationTypeAtKey(
-            endKey,
-            KeyframeInterpolationType.BEZIER,
-            KeyframeInterpolationType.BEZIER
+        // Make the jump instant
+        p.setInterpolationTypeAtKey(
+            key,
+            KeyframeInterpolationType.HOLD,
+            KeyframeInterpolationType.HOLD
         );
     }
-
-    t += beatLength;
 }
 
 app.endUndoGroup();
 
-alert(
-    "Carousel created!\n\n" +
-    "BPM: " + bpm +
-    "\nMovement: " +
-    Math.round(movePercent * 100) +
-    "% of each beat"
-);
+alert("Carousel created!\nDetected " + beats.length + " beats.");
